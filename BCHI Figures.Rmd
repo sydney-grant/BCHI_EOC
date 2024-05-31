@@ -1,0 +1,211 @@
+---
+title: "body comp calc v4"
+output: html_document
+date: "2024-05-17"
+---
+```{r}
+library(survival)
+library(survminer)
+library(forestmodel)
+library(ggplot2)
+library(ggpubr)
+library(ggplotify)
+```
+
+
+```{r}
+data <- read.csv("body comp dataset.csv")
+```
+
+```{r}
+data$subq_ht <- data$PRE_SUBQ_1 /(data$ht_first_met)^2
+data$vat_ht <- data$PRE_VAT_1 / (data$ht_first_met)^2
+data$sma_ht <- data$PRE_SMA_1 / (data$ht_first_met)^2
+  
+glm <- glm(survstat ~ vat_ht + sma_ht + subq_ht, data = data, family = binomial)
+summary(glm)
+```
+
+```{r}
+data$DMAI <- (1.407917 + -0.003635*data$vat_ht + -0.030907*data$sma_ht + 0.003873*data$subq_ht)
+```
+
+
+```{r}
+data$SMD <- (data$PRE_SMA_1 / data$PRE_IMA_1)
+```
+
+
+```{r}
+data$BCHI <- data$SMD * data$DMAI
+```
+
+```{r}
+res.cut <- surv_cutpoint(data, time = "survtime", event = "survstat",
+   variables = c("BCHI"))
+
+cutpoint_plot <- plot(res.cut, "BCHI")
+cutpoint_plot
+```
+
+```{r}
+cut_df <- data.frame("Stats" = res.cut$BCHI$stats, "Cut" = res.cut$BCHI$cuts)
+cut_df$BCHI <- "Low"
+cut_df$BCHI[cut_df$Cut > 3.48] <- "High"
+cut_df$BCHI <- factor(cut_df$BCHI, levels = c("Low", "High"))
+
+cut_plot <- ggplot(cut_df, aes(x = Cut, y = Stats, color = BCHI)) +
+  geom_point() +
+      theme_bw()+
+    xlab("BCHI") +
+  geom_vline(xintercept = 3.48, linetype = "dashed") +
+    ylab("Standardized Log-Rank Statistic")+
+      annotate(geom="text", x=5, y=1, label="Cutpoint = 3.48",
+              color="black", size = 4) +
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(legend.position = "top", plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.title = element_text(family = "serif", size = 14))
+cut_plot
+```
+
+
+```{r}
+res.cat <- surv_categorize(res.cut)
+fit <- survfit(Surv(survtime, survstat) ~ BCHI, data = res.cat)
+ggsurvplot(fit, risk.table = TRUE, conf.int = FALSE, pval = TRUE)
+```
+```{r}
+res.cat <- surv_categorize(res.cut)
+logrank <- survdiff(Surv(survtime, survstat) ~ BCHI, data = res.cat)
+logrank
+```
+
+```{r}
+data$Stage <- NA
+data$Stage[data$combined_stage == 1] <- "Stage I"
+data$Stage[data$combined_stage == 2] <- "Stage II"
+data$Stage[data$combined_stage == 3] <- "Stage III"
+data$Stage[data$combined_stage == 4] <- "Stage IV"
+data$Stage[data$combined_stage == 9] <- "Unknown"
+data$Stage <- as.factor(data$Stage)
+
+data$Grade <- NA
+data$Grade[data$grade_3 == 1] <- "Low Grade"
+data$Grade[data$grade_3 == 2] <- "Intermediate Grade"
+data$Grade[data$grade_3 == 3] <- "High Grade"
+data$Grade[data$grade_3 == 9] <- "Unknown"
+data$Grade <- as.factor(data$Grade)
+data$Grade <- relevel(data$Grade, ref = "Low Grade")
+
+data$Histotype <- NA
+data$Histotype[data$histotype_2 == 1] <- "High Grade Serous"
+data$Histotype[data$histotype_2 == 2] <- "Low Grade Serous"
+data$Histotype[data$histotype_2 == 3] <- "Clear Cell"
+data$Histotype[data$histotype_2 == 4] <- "Endometriod"
+data$Histotype[data$histotype_2 == 5] <- "Mucinous"
+data$Histotype[data$histotype_2 == 6] <- "Mixed"
+data$Histotype[data$histotype_2 == 7] <- "Other"
+data$Histotype <- as.factor(data$Histotype)
+
+data$Age <- data$ageDX
+
+
+res.cox <- coxph(Surv(survtime, survstat) ~ Stage + Age + Grade + Histotype + BCHI, data =  data)
+summary(res.cox)
+```
+```{r}
+library(forestmodel)
+forest_model(res.cox, covariates = c("Stage", "Age", "Grade", "Histotype", "BCHI"), exponentiate = TRUE,
+             format_options = list(colour = "black",
+                                            color = NULL,
+                                            shape = 20,
+                                            text_size = 5,
+                                            point_size = 5,
+                                            banded = FALSE
+                                            )
+)
+```
+
+```{r}
+res.cat$Stage <- data$Stage
+res.cat$BCHI[res.cat$BCHI == "low"] <- "Low"
+res.cat$BCHI[res.cat$BCHI == "high"] <- "High"
+res.cat$BCHI <- factor(res.cat$BCHI, levels = c("Low", "High"))
+fit <- survfit(Surv(survtime, survstat) ~ BCHI, data = subset(res.cat, Stage %in% c("Stage III", "Stage IV")))
+st34_plot <- ggsurvplot(fit,censor.size = 2, 
+                             legend.title = "",
+          conf.int = FALSE,       
+          risk.table = "nrisk_cumevents",        
+          risk.table.col = "strata",
+          risk.table.height = 0.3, 
+          pval = TRUE,
+          palette = c("#3399CC", "#CC3300"),
+    risk.table.y.text = FALSE,
+          ggtheme = theme_bw())
+
+st34_plot$plot <- st34_plot$plot +
+    xlab("Months") +
+    ylab("Survival Probability") +
+        theme_bw()+
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.position = "top")
+
+
+st34_plot$table$theme$text$size <- 10
+
+st34_plot$table <- st34_plot$table +
+    theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.position = "none") +
+  scale_color_manual(values = c("#3399CC", "#CC3300"))
+
+
+st34_plot
+```
+```{r}
+logrank <- survdiff(Surv(survtime, survstat) ~ BCHI, data = subset(res.cat, Stage %in% c("Stage III", "Stage IV")))
+logrank
+```
+
+```{r}
+res.cat$Stage <- data$Stage
+res.cat$BCHI[res.cat$BCHI == "low"] <- "Low"
+res.cat$BCHI[res.cat$BCHI == "high"] <- "High"
+res.cat$BCHI <- factor(res.cat$BCHI, levels = c("Low", "High"))
+fit <- survfit(Surv(survtime, survstat) ~ BCHI, data = res.cat)
+all_plot <- ggsurvplot(fit,censor.size = 2, 
+                             legend.title = "",
+          conf.int = FALSE,       
+          risk.table = "nrisk_cumevents",        
+          risk.table.col = "strata",
+          risk.table.height = 0.3, 
+          pval = TRUE,
+          palette = c("#3399CC", "#CC3300"),
+    risk.table.y.text = FALSE,
+          ggtheme = theme_bw())
+
+all_plot$plot <- all_plot$plot +
+    xlab("Months") +
+    ylab("Survival Probability") +
+        theme_bw()+
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.position = "top")
+
+
+all_plot$table$theme$text$size <- 10
+
+all_plot$table <- all_plot$table +
+    theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.position = "none") +
+  scale_color_manual(values = c("#3399CC", "#CC3300"))
+
+
+all_plot
+```
+
+
+```{r}
+library(ggpubr)
+
+figure1B <- ggarrange(st34_plot$plot, st34_plot$table, nrow = 2, ncol = 1, heights = c(2,1))
+figure1 <- ggarrange(cut_plot, st34_plot$plot, st34_plot$table, ncol = 1, nrow = 3, heights = c(1,2,0.75), labels = c("A", "B", ""), common.legend = TRUE, legend = "top")
+figure1
+```
+
+

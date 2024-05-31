@@ -1,0 +1,334 @@
+---
+title: "BCHI Supplementary Figures"
+output: html_document
+date: "2024-05-31"
+---
+
+```{r}
+library(survival)
+library(survminer)
+library(forestmodel)
+library(ggplot2)
+library(ggpubr)
+library(ggplotify)
+```
+
+
+```{r}
+data <- read.csv("body comp dataset.csv")
+```
+
+```{r}
+data$subq_ht <- data$PRE_SUBQ_1 /(data$ht_first_met)^2
+data$vat_ht <- data$PRE_VAT_1 / (data$ht_first_met)^2
+data$sma_ht <- data$PRE_SMA_1 / (data$ht_first_met)^2
+  
+glm <- glm(survstat ~ vat_ht + sma_ht + subq_ht, data = data, family = binomial)
+summary(glm)
+```
+
+```{r}
+data$DMAI <- (1.407917 + -0.003635*data$vat_ht + -0.030907*data$sma_ht + 0.003873*data$subq_ht)
+```
+
+```{r}
+res.cut <- surv_cutpoint(data, time = "survtime", event = "survstat",
+   variables = c("DMAI"))
+res.cat <- surv_categorize(res.cut)
+plot(res.cut, "DMAI", palette = "npg")
+```
+
+```{r}
+res.cat$Stage <- data$Stage
+res.cat$DMAI[res.cat$DMAI == "low"] <- "Low"
+res.cat$DMAI[res.cat$DMAI == "high"] <- "High"
+res.cat$DMAI <- factor(res.cat$DMAI, levels = c("Low", "High"))
+fit <- survfit(Surv(survtime, survstat) ~ DMAI, data = res.cat)
+dmai_plot <- ggsurvplot(fit,censor.size = 2, 
+                             legend.title = "",
+          conf.int = FALSE,       
+          risk.table = "nrisk_cumevents",        
+          risk.table.col = "strata",
+          risk.table.height = 0.3, 
+          pval = TRUE,
+          palette = c("#3399CC", "#CC3300"),
+    risk.table.y.text = FALSE,
+          ggtheme = theme_bw())
+
+dmai_plot$plot <- dmai_plot$plot +
+    xlab("Months") +
+    ylab("Survival Probability") +
+        theme_bw()+
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.position = "top")
+
+
+dmai_plot$table$theme$text$size <- 10
+
+dmai_plot$table <- dmai_plot$table +
+    theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.position = "none") +
+  scale_color_manual(values = c("#3399CC", "#CC3300"))
+
+
+dmai_plot
+```
+```{r}
+res.cat <- surv_categorize(res.cut)
+logrank <- survdiff(Surv(survtime, survstat) ~ DMAI, data = res.cat)
+logrank
+```
+
+```{r}
+cut_df <- data.frame("Stats" = res.cut$DMAI$stats, "Cut" = res.cut$DMAI$cuts)
+cut_df$DMAI <- "Low"
+cut_df$DMAI[cut_df$Cut > 0.28] <- "High"
+cut_df$DMAI <- factor(cut_df$DMAI, levels = c("Low", "High"))
+
+cut_plot <- ggplot(cut_df, aes(x = Cut, y = Stats, color = DMAI)) +
+  geom_point() +
+      theme_bw()+
+    xlab("DMAI") +
+  geom_vline(xintercept = 0.28, linetype = "dashed") +
+    ylab("Standardized \n Log-Rank Statistic")+
+      annotate(geom="text", x=0.4, y=1.5, label="Cutpoint = 0.28",
+              color="black", size = 4) +
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(legend.position = "top", plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.title = element_text(family = "serif", size = 14))
+cut_plot
+```
+```{r}
+data$Stage <- NA
+data$Stage[data$combined_stage == 1] <- "Stage I"
+data$Stage[data$combined_stage == 2] <- "Stage II"
+data$Stage[data$combined_stage == 3] <- "Stage III"
+data$Stage[data$combined_stage == 4] <- "Stage IV"
+data$Stage[data$combined_stage == 9] <- "Unknown"
+data$Stage <- as.factor(data$Stage)
+
+data$Grade <- NA
+data$Grade[data$grade_3 == 1] <- "Low Grade"
+data$Grade[data$grade_3 == 2] <- "Intermediate Grade"
+data$Grade[data$grade_3 == 3] <- "High Grade"
+data$Grade[data$grade_3 == 9] <- "Unknown"
+data$Grade <- as.factor(data$Grade)
+data$Grade <- relevel(data$Grade, ref = "Low Grade")
+
+data$Histotype <- NA
+data$Histotype[data$histotype_2 == 1] <- "High Grade Serous"
+data$Histotype[data$histotype_2 == 2] <- "Low Grade Serous"
+data$Histotype[data$histotype_2 == 3] <- "Clear Cell"
+data$Histotype[data$histotype_2 == 4] <- "Endometriod"
+data$Histotype[data$histotype_2 == 5] <- "Mucinous"
+data$Histotype[data$histotype_2 == 6] <- "Mixed"
+data$Histotype[data$histotype_2 == 7] <- "Other"
+data$Histotype <- as.factor(data$Histotype)
+
+data$Age <- data$ageDX
+
+
+res.cox <- coxph(Surv(survtime, survstat) ~ Stage + Age + Grade + Histotype + DMAI, data =  data)
+summary(res.cox)
+```
+```{r}
+library(forestmodel)
+fm <- as.ggplot(forest_model(res.cox, covariates = c("Stage", "Age", "Grade", "Histotype", "DMAI"), exponentiate = TRUE,
+             format_options = list(colour = "black",
+                                            color = NULL,
+                                            shape = 20,
+                                            text_size = 5,
+                                            point_size = 5,
+                                            banded = FALSE
+                                            ))
+)
+```
+```{r}
+fm2 <- fm +
+  theme(plot.margin = unit(c(0.5,0,0,0), "cm"))
+col1 <- ggarrange(cut_plot, fm2, ncol = 1, nrow = 2, heights = c(1,1.8), labels = c("A", "C"))
+col2 <- ggarrange(dmai_plot$plot, dmai_plot$table, ncol = 1, nrow = 2, heights = c(2.25,1), labels = c("B"))
+
+dmai_fig <- ggarrange(col1, col2, nrow = 1, ncol= 2)
+#saved 1400x700
+```
+
+############### SMD
+
+```{r}
+data$SMD <- (data$PRE_SMA_1 / data$PRE_IMA_1)
+```
+
+```{r}
+res.cut <- surv_cutpoint(data, time = "survtime", event = "survstat",
+   variables = c("SMD"))
+res.cat <- surv_categorize(res.cut)
+plot(res.cut, "SMD", palette = "npg")
+```
+
+```{r}
+res.cat$Stage <- data$Stage
+res.cat$SMD[res.cat$SMD == "low"] <- "Low"
+res.cat$SMD[res.cat$SMD == "high"] <- "High"
+res.cat$SMD <- factor(res.cat$SMD, levels = c("Low", "High"))
+fit <- survfit(Surv(survtime, survstat) ~ SMD, data = res.cat)
+smd_plot <- ggsurvplot(fit,censor.size = 2, 
+                             legend.title = "",
+          conf.int = FALSE,       
+          risk.table = "nrisk_cumevents",        
+          risk.table.col = "strata",
+          risk.table.height = 0.3, 
+          pval = TRUE,
+          palette = c("#3399CC", "#CC3300"),
+    risk.table.y.text = FALSE,
+          ggtheme = theme_bw())
+
+smd_plot$plot <- smd_plot$plot +
+    xlab("Months") +
+    ylab("Survival Probability") +
+        theme_bw()+
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.position = "top")
+
+
+smd_plot$table$theme$text$size <- 10
+
+smd_plot$table <- smd_plot$table +
+    theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.position = "none") +
+  scale_color_manual(values = c("#3399CC", "#CC3300"))
+
+
+smd_plot
+```
+```{r}
+res.cat <- surv_categorize(res.cut)
+logrank <- survdiff(Surv(survtime, survstat) ~ SMD, data = res.cat)
+logrank
+```
+
+
+```{r}
+cut_df <- data.frame("Stats" = res.cut$SMD$stats, "Cut" = res.cut$SMD$cuts)
+cut_df$SMD <- "Low"
+cut_df$SMD[cut_df$Cut > 13.55] <- "High"
+cut_df$SMD <- factor(cut_df$SMD, levels = c("Low", "High"))
+
+cut_plot <- ggplot(cut_df, aes(x = Cut, y = Stats, color = SMD)) +
+  geom_point() +
+      theme_bw()+
+    xlab("SMD") +
+  geom_vline(xintercept = 13.55, linetype = "dashed") +
+    ylab("Standardized \n Log-Rank Statistic")+
+      annotate(geom="text", x=12, y=1.5, label="Cutpoint = 13.55",
+              color="black", size = 4) +
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(legend.position = "top", plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.title = element_text(family = "serif", size = 14))
+cut_plot
+```
+```{r}
+data$Stage <- NA
+data$Stage[data$combined_stage == 1] <- "Stage I"
+data$Stage[data$combined_stage == 2] <- "Stage II"
+data$Stage[data$combined_stage == 3] <- "Stage III"
+data$Stage[data$combined_stage == 4] <- "Stage IV"
+data$Stage[data$combined_stage == 9] <- "Unknown"
+data$Stage <- as.factor(data$Stage)
+
+data$Grade <- NA
+data$Grade[data$grade_3 == 1] <- "Low Grade"
+data$Grade[data$grade_3 == 2] <- "Intermediate Grade"
+data$Grade[data$grade_3 == 3] <- "High Grade"
+data$Grade[data$grade_3 == 9] <- "Unknown"
+data$Grade <- as.factor(data$Grade)
+data$Grade <- relevel(data$Grade, ref = "Low Grade")
+
+data$Histotype <- NA
+data$Histotype[data$histotype_2 == 1] <- "High Grade Serous"
+data$Histotype[data$histotype_2 == 2] <- "Low Grade Serous"
+data$Histotype[data$histotype_2 == 3] <- "Clear Cell"
+data$Histotype[data$histotype_2 == 4] <- "Endometriod"
+data$Histotype[data$histotype_2 == 5] <- "Mucinous"
+data$Histotype[data$histotype_2 == 6] <- "Mixed"
+data$Histotype[data$histotype_2 == 7] <- "Other"
+data$Histotype <- as.factor(data$Histotype)
+
+data$Age <- data$ageDX
+
+
+res.cox <- coxph(Surv(survtime, survstat) ~ Stage + Age + Grade + Histotype + SMD, data =  data)
+summary(res.cox)
+```
+```{r}
+library(forestmodel)
+fm <- as.ggplot(forest_model(res.cox, covariates = c("Stage", "Age", "Grade", "Histotype", "SMD"), exponentiate = TRUE,
+             format_options = list(colour = "black",
+                                            color = NULL,
+                                            shape = 20,
+                                            text_size = 5,
+                                            point_size = 5,
+                                            banded = FALSE
+                                            ))
+)
+```
+```{r}
+fm2 <- fm +
+  theme(plot.margin = unit(c(0.5,0,0,0), "cm"))
+col1 <- ggarrange(cut_plot, fm2, ncol = 1, nrow = 2, heights = c(1,1.8), labels = c("A", "C"))
+col2 <- ggarrange(smd_plot$plot, smd_plot$table, ncol = 1, nrow = 2, heights = c(2.25,1), labels = c("B"))
+
+smd_fig <- ggarrange(col1, col2, nrow = 1, ncol= 2)
+#saved 1400x700
+```
+
+```{r}
+data$BCHI <- data$SMD * data$DMAI
+```
+
+```{r}
+res.cut <- surv_cutpoint(data, time = "survtime", event = "survstat",
+   variables = c("BCHI"))
+res.cat <- surv_categorize(res.cut)
+res.cat$BCHI[res.cat$BCHI == "low"] <- "Low"
+res.cat$BCHI[res.cat$BCHI == "high"] <- "High"
+res.cat$BCHI <- factor(res.cat$BCHI, levels = c("Low", "High"))
+```
+
+```{r}
+im <- read.csv("immuno patients.csv")
+im <- subset(im, immunotherapy_yes_no == "Yes")
+res.cat$MRN <- data$MRN
+res.cat <- subset(res.cat, MRN %in% im$MRN)
+```
+
+
+```{r}
+
+fit <- survfit(Surv(survtime, survstat) ~ BCHI, data = res.cat)
+im_plot <- ggsurvplot(fit,censor.size = 2, 
+                             legend.title = "",
+          conf.int = FALSE,       
+          risk.table = "nrisk_cumevents",        
+          risk.table.col = "strata",
+          risk.table.height = 0.3, 
+          pval = TRUE,
+          palette = c("#3399CC", "#CC3300"),
+    risk.table.y.text = FALSE,
+          ggtheme = theme_bw())
+
+im_plot$plot <- im_plot$plot +
+    xlab("Months") +
+    ylab("Survival Probability") +
+        theme_bw()+
+  scale_color_manual(values = c("#3399CC", "#CC3300")) +
+  theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.text = element_text(family = "serif", size = 12), legend.position = "top")
+
+
+im_plot$table$theme$text$size <- 10
+
+im_plot$table <- im_plot$table +
+    theme(plot.title=element_text(hjust=0.5, family = "serif", size = 14), axis.title = element_text(family = "serif", size = 14), axis.text = element_text(family = "serif", size = 12), legend.position = "none") +
+  scale_color_manual(values = c("#3399CC", "#CC3300"))
+
+
+im_plot
+```
+
+
